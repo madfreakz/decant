@@ -128,8 +128,10 @@ export default function ScanPage() {
       if (!res.ok || !res.body) {
         throw new Error(`Bad response: ${res.status}`);
       }
+      const localRecognitions: Record<number, RecognitionData["rated"]> = {};
       await consumeSSE(res.body, (event) => {
         if (event.type === "recognition") {
+          localRecognitions[event.index] = event.rated;
           setRecognitions((prev) => ({ ...prev, [event.index]: event.rated }));
         } else if (event.type === "scored") {
           setScoring(event.result);
@@ -138,8 +140,10 @@ export default function ScanPage() {
           // Persist verdict to journal for the home-screen scroll
           const verdictIdx = event.result.verdict_index;
           const verdictWine = allWines[verdictIdx];
-          const verdictScore = event.result.scored.find((s) => s.index === verdictIdx);
-          const recognition = recognitions[verdictIdx];
+          const verdictScore = event.result.scored.find(
+            (s: ScoringResult["scored"][number]) => s.index === verdictIdx
+          );
+          const recognition = localRecognitions[verdictIdx];
           if (verdictWine && verdictScore) {
             saveVerdict({
               winery: recognition?.winery ?? verdictWine.winery,
@@ -310,7 +314,6 @@ export default function ScanPage() {
         ref={fileInputRef}
         type="file"
         accept="image/*"
-        // @ts-expect-error capture is valid for camera
         capture="environment"
         onChange={handleFilePicked}
         className="hidden"
@@ -376,9 +379,17 @@ export default function ScanPage() {
   );
 }
 
+type SSEEventIn =
+  | { type: "recognition"; index: number; rated: RecognitionData["rated"] }
+  | { type: "scored"; result: ScoringResult }
+  | { type: "enrichment"; index: number; vivino: EnrichmentData["vivino"] }
+  | { type: "enrichment_unavailable"; reason: string }
+  | { type: "done" }
+  | { type: "error"; message: string };
+
 async function consumeSSE(
   body: ReadableStream<Uint8Array>,
-  onEvent: (event: any) => void
+  onEvent: (event: SSEEventIn) => void
 ) {
   const reader = body.getReader();
   const decoder = new TextDecoder();
