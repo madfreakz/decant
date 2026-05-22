@@ -56,9 +56,17 @@ export function PageThumbStrip({ pages, onRetake, onAddPage }: Props) {
               : page.status === "uploading"
               ? "Reading…"
               : page.status === "error"
-              ? "Try again"
+              ? "Tap to retake"
               : ""}
           </div>
+          {page.status === "error" && page.errorMessage && (
+            <div
+              className="mt-1 text-center text-[10px] leading-tight max-w-[120px] mx-auto"
+              style={{ color: "var(--color-bordeaux)", fontFamily: "var(--font-ui)" }}
+            >
+              {page.errorMessage}
+            </div>
+          )}
         </button>
       ))}
 

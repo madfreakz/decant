@@ -6,6 +6,7 @@ export type CapturedPage = {
   status: "uploading" | "done" | "error";
   wineCount: number;
   wines: ScannedWine[];
+  errorMessage?: string;
 };
 
 export type ScanState = {

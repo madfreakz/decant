@@ -153,66 +153,79 @@ export default function ScanPage() {
   }
 
   async function uploadPage(id: string, file: File) {
-    // At 1024px, JPEG 0.40 → ~100–300 KB for a typical iPhone photo.
-    // Well under Vercel's 4.5 MB limit even with base64 overhead.
+    const fileSizeMb = (file.size / 1e6).toFixed(1);
+    console.log(`uploadPage start: ${fileSizeMb} MB, type="${file.type}", name="${file.name}"`);
+
+    // Surface diagnostic info to the user — replaces silent "try again"
+    const failWith = (msg: string) => {
+      console.error("upload failed:", msg);
+      dispatch({ type: "UPDATE_PAGE", id, patch: { status: "error", errorMessage: msg } });
+    };
+
+    // Canvas compression — works for JPEG/PNG, fails for HEIC on Chrome iOS
     const QUALITY_STEPS = [0.80, 0.60, 0.40];
     const SIZE_LIMIT = 1.5 * 1024 * 1024;
     let compressed: Blob | null = null;
 
     for (const q of QUALITY_STEPS) {
       const attempt = await tryCanvasCompress(file, q);
-      if (attempt === null) break; // canvas can't decode this format — stop trying
+      if (attempt === null) break;
       compressed = attempt;
       if (compressed.size <= SIZE_LIMIT) break;
       console.warn(`compress q=${q}: ${(compressed.size / 1e6).toFixed(2)} MB, trying harder`);
     }
 
-    if (compressed !== null) {
-      // Canvas succeeded — upload the compressed JPEG via FormData.
-      // At 1024px this is always well under SIZE_LIMIT, but guard anyway.
-      const form = new FormData();
-      form.append("image", compressed, "page.jpg");
-      console.log(`Uploading compressed JPEG: ${(compressed.size / 1024).toFixed(0)} KB`);
+    // Hard rule: never send anything > 3 MB to the server (Vercel proxy
+    // caps at 4.5 MB and base64 adds 33% overhead).
+    const HARD_CAP = 3 * 1024 * 1024;
+
+    if (compressed === null) {
+      // Canvas couldn't decode. Either HEIC on Chrome iOS, or corrupt file.
+      // Don't fall back to sending the original — it will be too big.
+      if (file.size > HARD_CAP) {
+        failWith(`${fileSizeMb}MB ${file.type || "image"} can't be processed. Open in Safari instead, or set Camera → Formats → Most Compatible.`);
+        return;
+      }
+      // Small enough to send raw as base64; let Gemini decode it.
+      console.warn("canvas failed but file is small — base64 fallback");
       try {
-        const res = await fetch("/api/ocr-page", { method: "POST", body: form });
+        const { base64, mimeType } = await readAsBase64(file);
+        const res = await fetch("/api/ocr-page", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ imageBase64: base64, mimeType }),
+        });
         const data = (await res.json()) as { wines?: ScannedWine[]; error?: string };
         if (!res.ok || !data.wines) {
-          console.error("OCR error (FormData):", res.status, data.error);
-          dispatch({ type: "UPDATE_PAGE", id, patch: { status: "error" } });
+          failWith(`Server ${res.status}: ${data.error ?? "unknown error"}`);
           return;
         }
         dispatch({ type: "UPDATE_PAGE", id, patch: { status: "done", wines: data.wines, wineCount: data.wines.length } });
-        return;
       } catch (err) {
-        console.error("OCR fetch failed (FormData):", err);
-        dispatch({ type: "UPDATE_PAGE", id, patch: { status: "error" } });
-        return;
+        failWith(`Network error: ${err instanceof Error ? err.message : String(err)}`);
       }
+      return;
     }
 
-    // Canvas returned null — format not decodable (HEIC on Chrome iOS).
-    // Send raw bytes as base64 JSON. Gemini accepts image/heic natively.
-    // NOTE: we send the original file here. Typical HEIC is 3–5 MB →
-    // base64 ~4–7 MB. If it exceeds Vercel's 4.5 MB limit the server
-    // returns a clear 413 with instructions.
-    console.warn(`Canvas decode failed — base64 JSON fallback. File: ${(file.size / 1e6).toFixed(2)} MB, type: ${file.type}`);
+    // Canvas succeeded. Send the compressed JPEG.
+    if (compressed.size > HARD_CAP) {
+      failWith(`Couldn't compress photo enough (${(compressed.size / 1e6).toFixed(1)}MB). Try a closer shot.`);
+      return;
+    }
+    console.log(`upload: ${(compressed.size / 1024).toFixed(0)} KB JPEG`);
+
+    const form = new FormData();
+    form.append("image", compressed, "page.jpg");
     try {
-      const { base64, mimeType } = await readAsBase64(file);
-      const res = await fetch("/api/ocr-page", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ imageBase64: base64, mimeType }),
-      });
+      const res = await fetch("/api/ocr-page", { method: "POST", body: form });
       const data = (await res.json()) as { wines?: ScannedWine[]; error?: string };
       if (!res.ok || !data.wines) {
-        console.error("OCR error (base64 JSON):", res.status, data.error);
-        dispatch({ type: "UPDATE_PAGE", id, patch: { status: "error" } });
+        failWith(`Server ${res.status}: ${data.error ?? "unknown error"}`);
         return;
       }
       dispatch({ type: "UPDATE_PAGE", id, patch: { status: "done", wines: data.wines, wineCount: data.wines.length } });
     } catch (err) {
-      console.error("OCR fetch failed (base64 JSON):", err);
-      dispatch({ type: "UPDATE_PAGE", id, patch: { status: "error" } });
+      failWith(`Network error: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -495,7 +508,7 @@ export default function ScanPage() {
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*,image/heic,image/heif"
+        accept="image/jpeg"
         capture="environment"
         onChange={handleFilePicked}
         className="hidden"
