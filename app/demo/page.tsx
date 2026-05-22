@@ -22,6 +22,7 @@ const SAMPLE_SCORE = {
   index: 0,
   score: 4.3,
   reasoning: "Earthy Nebbiolo from a producer you've trusted before.",
+  notes: "Earthy Barolo, trusted producer.",
   confidence: "high" as const,
   skip_reason: null,
 };
@@ -41,11 +42,11 @@ const FULL_LIST_WINES = [
 ];
 
 const FULL_LIST_SCORES = [
-  { index: 0, score: 4.3, reasoning: "Earthy Nebbiolo from a producer you've trusted before.", confidence: "high" as const, skip_reason: null },
-  { index: 1, score: 4.8, reasoning: "Clos Saint Jean is a benchmark — this is your sweet spot.", confidence: "high" as const, skip_reason: null },
-  { index: 2, score: 4.5, reasoning: "Most reliable Brunello producer, classic Tier 1.", confidence: "high" as const, skip_reason: null },
-  { index: 3, score: 1.5, reasoning: "Generic Pinot Noir, no producer. Pass.", confidence: "low" as const, skip_reason: "generic" },
-  { index: 4, score: 3.2, reasoning: "Decent Zin but young, lacks the earthy depth you'd want.", confidence: "medium" as const, skip_reason: "fruit-forward" },
+  { index: 0, score: 4.3, reasoning: "Earthy Nebbiolo from a producer you've trusted before.", notes: "Earthy Barolo, trusted producer.", confidence: "high" as const, skip_reason: null },
+  { index: 1, score: 4.8, reasoning: "Clos Saint Jean is a benchmark — this is your sweet spot.", notes: "Châteauneuf flagship, five stars twice.", confidence: "high" as const, skip_reason: null },
+  { index: 2, score: 4.5, reasoning: "Most reliable Brunello producer, classic Tier 1.", notes: "Brunello, Tier 1 producer.", confidence: "high" as const, skip_reason: null },
+  { index: 3, score: 1.5, reasoning: "Generic Pinot Noir, no producer. Pass.", notes: "Generic house Pinot. Pass.", confidence: "low" as const, skip_reason: "generic" },
+  { index: 4, score: 3.2, reasoning: "Decent Zin but young, lacks the earthy depth you'd want.", notes: "Young Zin, fruit-forward.", confidence: "medium" as const, skip_reason: "fruit-forward" },
 ];
 
 export default function DemoPage() {
@@ -88,15 +89,21 @@ export default function DemoPage() {
             expanded={expanded}
             onExpand={() => setExpanded((v) => !v)}
           />
-          <div className="mt-4 flex gap-3">
+          <div className="mt-4 flex gap-3 overflow-hidden">
             <AlternatePill
               label="Closer to home"
               wineName="Tenuta Il Poggione Brunello"
+              notes="Brunello, Tier 1 producer."
+              score={4.5}
+              price={120}
               variant="safer"
             />
             <AlternatePill
               label="Worth a gamble"
               wineName="Faiveley Latricières-Chambertin"
+              notes="Grand Cru Burgundy, one to know."
+              score={4.1}
+              price={185}
               variant="wild"
             />
           </div>

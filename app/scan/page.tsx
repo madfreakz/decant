@@ -3,6 +3,7 @@
 import { useReducer, useRef, useState, useEffect, useMemo } from "react";
 import { initialState, scanReducer } from "@/lib/scan-state";
 import { dedupeWines } from "@/lib/dedupe";
+import { detectWineType, type WineType } from "@/lib/wine-type";
 import { PageThumbStrip } from "@/components/PageThumbStrip";
 import { ProcessingSeal } from "@/components/ProcessingSeal";
 import { VerdictHero } from "@/components/VerdictHero";
@@ -145,6 +146,10 @@ export default function ScanPage() {
 
   async function handleReadList() {
     if (allWines.length === 0) return;
+    dispatch({ type: "SET_PHASE", phase: "type-select" });
+  }
+
+  async function handleSelectWineType(wineType: "red" | "white" | "sparkling") {
     dispatch({ type: "SET_PHASE", phase: "processing" });
     setScoring(null);
     setRecognitions({});
@@ -154,7 +159,7 @@ export default function ScanPage() {
       const res = await fetch("/api/recommend", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ wines: allWines }),
+        body: JSON.stringify({ wines: allWines, wineType }),
       });
       if (!res.ok || !res.body) {
         throw new Error(`Bad response: ${res.status}`);
@@ -209,6 +214,62 @@ export default function ScanPage() {
 
   // ---- Render phases ----
 
+  if (state.phase === "type-select") {
+    const typeCounts: Record<string, number> = { red: 0, white: 0, sparkling: 0 };
+    for (const w of allWines) {
+      const t = detectWineType(w);
+      if (t === "red" || t === "white" || t === "sparkling") typeCounts[t]++;
+    }
+    const types: { key: "red" | "white" | "sparkling"; label: string }[] = [
+      { key: "red", label: "Red" },
+      { key: "white", label: "White" },
+      { key: "sparkling", label: "Sparkling" },
+    ];
+    return (
+      <main className="min-h-dvh flex flex-col px-5 py-8 max-w-md mx-auto">
+        <header className="flex items-center justify-between mb-8">
+          <button
+            onClick={handleReset}
+            className="text-sm tracking-wide"
+            style={{ color: "var(--color-ink)", opacity: 0.5 }}
+          >
+            New scan
+          </button>
+          <WaxSeal size={28} />
+        </header>
+        <div className="flex-1 flex flex-col justify-center">
+          <h2
+            className="font-display text-2xl mb-8 leading-tight"
+            style={{ color: "var(--color-ink)" }}
+          >
+            What would you like tonight?
+          </h2>
+          <div className="space-y-3">
+            {types.map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => handleSelectWineType(key)}
+                className="w-full text-left py-4 px-5 rounded-md flex items-center justify-between"
+                style={{
+                  background: "var(--color-bordeaux)",
+                  color: "var(--color-cream)",
+                  fontFamily: "var(--font-ui)",
+                }}
+              >
+                <span className="tracking-wide">{label}</span>
+                {typeCounts[key] > 0 && (
+                  <span className="text-sm opacity-70">
+                    {typeCounts[key]} wine{typeCounts[key] === 1 ? "" : "s"}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   if (state.phase === "processing") {
     return (
       <ProcessingSeal
@@ -228,6 +289,8 @@ export default function ScanPage() {
     const wildIdx = scoring.wild_card_index;
     const saferWine = saferIdx != null ? allWines[saferIdx] : null;
     const wildWine = wildIdx != null ? allWines[wildIdx] : null;
+    const saferScore = saferIdx != null ? scoring.scored.find((s) => s.index === saferIdx) : null;
+    const wildScore = wildIdx != null ? scoring.scored.find((s) => s.index === wildIdx) : null;
 
     return (
       <main className="min-h-dvh px-5 py-8 max-w-md mx-auto">
@@ -275,18 +338,24 @@ export default function ScanPage() {
         ) : null}
 
         {(saferWine || wildWine) && (
-          <div className="mt-4 flex gap-3">
-            {saferWine && (
+          <div className="mt-4 flex gap-3 overflow-hidden">
+            {saferWine && saferScore && (
               <AlternatePill
                 label="Closer to home"
                 wineName={`${saferWine.winery} ${saferWine.name}`}
+                notes={saferScore.notes}
+                score={saferScore.score}
+                price={saferWine.price_usd}
                 variant="safer"
               />
             )}
-            {wildWine && (
+            {wildWine && wildScore && (
               <AlternatePill
                 label="Worth a gamble"
                 wineName={`${wildWine.winery} ${wildWine.name}`}
+                notes={wildScore.notes}
+                score={wildScore.score}
+                price={wildWine.price_usd}
                 variant="wild"
               />
             )}

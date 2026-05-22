@@ -90,7 +90,7 @@ export function VerdictHero({ wine, scored, enrichment, expanded, onExpand }: Pr
         className="mt-5 font-display italic text-lg leading-snug"
         style={{ color: "var(--color-ink)", opacity: 0.85 }}
       >
-        {scored.reasoning}
+        {expanded ? scored.reasoning : (scored.notes || scored.reasoning)}
       </p>
 
       {expanded && enrichment && (

@@ -120,6 +120,8 @@ Confidence:
 
 Skip reason (for wines scoring < 3.5): ONE word, lowercase, italic-style. Pick from: oaky, fruit-forward, too young, thin, jammy, flabby, confected, unfamiliar, generic.
 
+Notes: ≤8 words capturing tasting character. No full sentences. Examples: "Earthy Barolo, trusted producer." / "Structured Merlot, Right Bank." / "Fruit-forward Napa Cab."
+
 ALSO pick a top "verdict" (the single best wine) and two alternates:
 - safer_pick: high-confidence, slightly lower ceiling than the verdict
 - wild_card: lower-confidence but aligned with Mark's adventurous tendencies (one stretch he might love)
@@ -132,6 +134,7 @@ export type ScoredWine = {
   index: number;
   score: number;
   reasoning: string;
+  notes: string;
   confidence: "high" | "medium" | "low";
   skip_reason: string | null;
 };
@@ -154,13 +157,14 @@ const SCORING_SCHEMA = {
           index: { type: Type.INTEGER },
           score: { type: Type.NUMBER },
           reasoning: { type: Type.STRING },
+          notes: { type: Type.STRING },
           confidence: {
             type: Type.STRING,
             enum: ["high", "medium", "low"],
           },
           skip_reason: { type: Type.STRING, nullable: true },
         },
-        required: ["index", "score", "reasoning", "confidence"],
+        required: ["index", "score", "reasoning", "notes", "confidence"],
       },
     },
     verdict_index: { type: Type.INTEGER },
@@ -172,7 +176,8 @@ const SCORING_SCHEMA = {
 
 export async function scoreWines(
   wines: ScannedWine[],
-  recognitionMatches: Record<number, { wineName: string; rating: number; date: string }>
+  recognitionMatches: Record<number, { wineName: string; rating: number; date: string }>,
+  wineTypeConstraint?: string
 ): Promise<ScoringResult> {
   const ai = getAI();
 
@@ -185,7 +190,11 @@ export async function scoreWines(
     })
     .join("\n");
 
-  const userPrompt = `Here is the wine list (indexed). Score every wine and pick the verdict + alternates.
+  const constraint = wineTypeConstraint
+    ? `Mark wants only ${wineTypeConstraint.toUpperCase()} wines tonight. All three picks (verdict, safer_pick, wild_card) must be ${wineTypeConstraint}.\n\n`
+    : "";
+
+  const userPrompt = `${constraint}Here is the wine list (indexed). Score every wine and pick the verdict + alternates.
 
 ${wineLines}`;
 

@@ -10,7 +10,7 @@ export type CapturedPage = {
 
 export type ScanState = {
   pages: CapturedPage[];
-  phase: "capture" | "processing" | "verdict";
+  phase: "capture" | "type-select" | "processing" | "verdict";
 };
 
 export type ScanAction =
