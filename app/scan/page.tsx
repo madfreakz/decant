@@ -64,6 +64,20 @@ export default function ScanPage() {
     }
   }, [state.pages, state.phase]);
 
+  // Pre-warm Vercel lambdas so the user's first OCR call doesn't pay cold-start.
+  // Fires the moment /scan mounts. Subsequent fires when the user reaches
+  // the type-select screen prime the recommend lambda before they pick a type.
+  useEffect(() => {
+    fetch("/api/ocr-page").catch(() => {});
+    fetch("/api/recommend").catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (state.phase === "type-select") {
+      fetch("/api/recommend").catch(() => {});
+    }
+  }, [state.phase]);
+
   const allWines: ScannedWine[] = useMemo(() => {
     const merged = state.pages.flatMap((p) => p.wines);
     return dedupeWines(merged);

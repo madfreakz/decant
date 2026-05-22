@@ -5,6 +5,12 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
+// Warm-up endpoint: hit on page mount to defrost the lambda before the photo
+// upload arrives. Vercel keeps functions warm for ~5 min after last invocation.
+export async function GET() {
+  return NextResponse.json({ ok: true, warm: true });
+}
+
 // Vercel's hard body limit is 4.5 MB. We enforce a slightly tighter limit here
 // so the error is ours (with a clear message) rather than a 413 from the proxy.
 const MAX_BYTES = 4 * 1024 * 1024; // 4 MB

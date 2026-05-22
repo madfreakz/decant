@@ -7,6 +7,12 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+// Warm-up endpoint: hit on type-select screen so the lambda is defrosted
+// by the time the user actually picks Red/White/Sparkling.
+export async function GET() {
+  return NextResponse.json({ ok: true, warm: true });
+}
+
 type Recognition = {
   winery: string;
   wine_name: string;
