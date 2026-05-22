@@ -1,0 +1,13 @@
+{
+  "name": "Decant",
+  "short_name": "Decant",
+  "description": "Read a wine list. Order what you'd love.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F5EFE6",
+  "theme_color": "#7A1220",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
