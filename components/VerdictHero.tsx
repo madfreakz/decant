@@ -84,14 +84,14 @@ export function VerdictHero({ wine, scored, enrichment, expanded, onExpand }: Pr
             aria-label={`${conf} confidence`}
           />
         </div>
-        {wine.price_usd != null && (
-          <span
-            className="ml-auto font-mono text-2xl"
-            style={{ color: "var(--color-bordeaux)" }}
-          >
-            ${wine.price_usd}
-          </span>
-        )}
+        <span
+          className="ml-auto font-mono text-2xl"
+          style={{
+            color: wine.price_usd != null ? "var(--color-bordeaux)" : "var(--color-paper-shadow)",
+          }}
+        >
+          {wine.price_usd != null ? `$${wine.price_usd}` : "—"}
+        </span>
       </div>
 
       <p

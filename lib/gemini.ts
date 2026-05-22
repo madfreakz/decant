@@ -21,8 +21,17 @@ For each wine, capture:
 - vintage (4-digit year if visible, otherwise null)
 - region (appellation if visible, e.g. "Saint-Émilion", "Barolo")
 - varietal (grape if visible, e.g. "Pinot Noir", "Sangiovese")
-- price_usd (numeric, no symbols; null if missing)
-- by_glass (true if listed as "by the glass" / "BTG", false if bottle-only or ambiguous)
+- price_usd (the BOTTLE price as a number, no symbols)
+- by_glass (true if only a glass price is shown, false if a bottle price exists)
+
+PRICE EXTRACTION IS CRITICAL — every wine on a menu has a price. Look hard:
+- Prices are usually 2–3 digit numbers (35, 85, 145) on the right side of the line
+- "12/45" or "12 / 45" or "12•45" = glass price / bottle price. Take 45.
+- "25 | 120" = same pattern. Take 120.
+- If only one number is shown and the wine is listed under a "By the Glass" section, that's the glass price → set by_glass=true and put that number in price_usd
+- If only one number is shown otherwise, it's the bottle price → by_glass=false
+- Strip dollar signs, commas, and any "$" or "USD"
+- Only set price_usd=null if the wine genuinely has no number visible
 
 Rules:
 - One entry per distinct wine. If multiple vintages of the same wine appear on one line, output the most prominent.
