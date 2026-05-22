@@ -83,44 +83,132 @@ export default function ScanPage() {
     uploadPage(id, file);
   }
 
-  function compressImage(file: File): Promise<Blob> {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
+  // Tries to compress via canvas. Returns null if the image can't be decoded
+  // (e.g. HEIC on Chrome iOS where the WebKit canvas codec is unavailable).
+  // Never hangs: rejects after 5 s if img.onload never fires.
+  function tryCanvasCompress(file: File, quality: number): Promise<Blob | null> {
+    return new Promise((resolve) => {
       const url = URL.createObjectURL(file);
-      img.onload = () => {
-        URL.revokeObjectURL(url);
-        const MAX = 1920;
-        const ratio = Math.min(MAX / img.naturalWidth, MAX / img.naturalHeight, 1);
-        const w = Math.round(img.naturalWidth * ratio);
-        const h = Math.round(img.naturalHeight * ratio);
-        const canvas = document.createElement("canvas");
-        canvas.width = w;
-        canvas.height = h;
-        canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
-        canvas.toBlob(
-          (b) => (b ? resolve(b) : reject(new Error("toBlob returned null"))),
-          "image/jpeg",
-          0.85
-        );
+      const img = new Image();
+      let settled = false;
+
+      const cleanup = () => {
+        if (!settled) {
+          settled = true;
+          URL.revokeObjectURL(url);
+        }
       };
-      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("img load failed")); };
+
+      const timer = setTimeout(() => {
+        cleanup();
+        console.warn("compressImage: img.onload timed out (HEIC decode unsupported?)");
+        resolve(null);
+      }, 5000);
+
+      img.onload = () => {
+        clearTimeout(timer);
+        cleanup();
+        try {
+          const MAX = 1920;
+          const ratio = Math.min(MAX / img.naturalWidth, MAX / img.naturalHeight, 1);
+          const w = Math.round(img.naturalWidth * ratio);
+          const h = Math.round(img.naturalHeight * ratio);
+          const canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+          canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
+          canvas.toBlob(
+            (b) => resolve(b ?? null),
+            "image/jpeg",
+            quality
+          );
+        } catch {
+          resolve(null);
+        }
+      };
+
+      img.onerror = () => {
+        clearTimeout(timer);
+        cleanup();
+        resolve(null);
+      };
+
       img.src = url;
     });
   }
 
+  // Reads a File as a base64 data string. Used as the HEIC fallback path.
+  function readAsBase64(file: File): Promise<{ base64: string; mimeType: string }> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        // result is "data:<mimeType>;base64,<data>"
+        const commaIdx = result.indexOf(",");
+        const base64 = result.slice(commaIdx + 1);
+        // Prefer the file's own MIME type; fall back to what FileReader reported
+        const mimeType = file.type || "image/jpeg";
+        resolve({ base64, mimeType });
+      };
+      reader.onerror = () => reject(new Error("FileReader failed"));
+      reader.readAsDataURL(file);
+    });
+  }
+
   async function uploadPage(id: string, file: File) {
-    let payload: Blob = file;
-    try {
-      payload = await compressImage(file);
-    } catch (err) {
-      console.warn("Image compression failed, uploading original:", err);
+    // Step 1: try canvas compression at decreasing quality levels.
+    // This works for JPEG/PNG/WebP. Fails silently for HEIC on Chrome iOS.
+    const QUALITY_STEPS = [0.85, 0.70, 0.50];
+    const SIZE_LIMIT = 3.5 * 1024 * 1024; // 3.5 MB — safe under Vercel's 4.5 MB limit
+    let compressed: Blob | null = null;
+
+    for (const q of QUALITY_STEPS) {
+      const attempt = await tryCanvasCompress(file, q);
+      if (!attempt) break; // canvas can't decode this format at all — stop trying
+      compressed = attempt;
+      if (compressed.size <= SIZE_LIMIT) break;
+      console.warn(`compressImage: ${(compressed.size / 1e6).toFixed(1)} MB at q=${q}, retrying`);
     }
-    const form = new FormData();
-    form.append("image", payload, "page.jpg");
+
+    // Step 2: if canvas compression produced something small enough, use FormData.
+    if (compressed && compressed.size <= SIZE_LIMIT) {
+      const form = new FormData();
+      form.append("image", compressed, "page.jpg");
+      try {
+        const res = await fetch("/api/ocr-page", { method: "POST", body: form });
+        const data = (await res.json()) as { wines?: ScannedWine[]; error?: string };
+        if (!res.ok || !data.wines) {
+          console.error("OCR error (FormData):", data.error);
+          dispatch({ type: "UPDATE_PAGE", id, patch: { status: "error" } });
+          return;
+        }
+        dispatch({
+          type: "UPDATE_PAGE",
+          id,
+          patch: { status: "done", wines: data.wines, wineCount: data.wines.length },
+        });
+        return;
+      } catch (err) {
+        console.error("OCR fetch failed (FormData):", err);
+        dispatch({ type: "UPDATE_PAGE", id, patch: { status: "error" } });
+        return;
+      }
+    }
+
+    // Step 3: HEIC fallback — read as base64, POST as JSON.
+    // Gemini accepts image/heic natively so we send the raw file bytes.
+    // Base64 overhead is ~33%; a 3 MB HEIC → ~4 MB JSON body, under Vercel's limit.
+    console.warn("compressImage failed or oversized — falling back to base64 JSON upload");
     try {
-      const res = await fetch("/api/ocr-page", { method: "POST", body: form });
+      const { base64, mimeType } = await readAsBase64(file);
+      const res = await fetch("/api/ocr-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ imageBase64: base64, mimeType }),
+      });
       const data = (await res.json()) as { wines?: ScannedWine[]; error?: string };
       if (!res.ok || !data.wines) {
+        console.error("OCR error (base64 JSON):", data.error);
         dispatch({ type: "UPDATE_PAGE", id, patch: { status: "error" } });
         return;
       }
@@ -130,7 +218,7 @@ export default function ScanPage() {
         patch: { status: "done", wines: data.wines, wineCount: data.wines.length },
       });
     } catch (err) {
-      console.error(err);
+      console.error("OCR fetch failed (base64 JSON):", err);
       dispatch({ type: "UPDATE_PAGE", id, patch: { status: "error" } });
     }
   }
@@ -414,7 +502,7 @@ export default function ScanPage() {
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,image/heic,image/heif"
         capture="environment"
         onChange={handleFilePicked}
         className="hidden"
