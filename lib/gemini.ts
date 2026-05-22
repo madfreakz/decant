@@ -261,25 +261,60 @@ export async function scoreWines(
 
 ${wineLines}`;
 
-  const res = await ai.models.generateContent({
-    model: SCORING_MODEL,
-    contents: [
-      {
-        role: "user",
-        parts: [{ text: userPrompt }],
+  // Race Lite (fast, no thinking) vs Flash (slower, with thinking) — take whichever returns first.
+  // Flash Lite scores in ~3s when available; Flash with thinkingBudget takes 7-12s.
+  const callScoring = (model: string, withThinking: boolean) =>
+    ai.models.generateContent({
+      model,
+      contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+      config: {
+        systemInstruction: SCORING_PROMPT,
+        responseMimeType: "application/json",
+        responseSchema: SCORING_SCHEMA,
+        temperature: 0.4,
+        ...(withThinking ? { thinkingConfig: { thinkingBudget: 128 } } : {}),
+        maxOutputTokens: 3072,
       },
-    ],
-    config: {
-      systemInstruction: SCORING_PROMPT,
-      responseMimeType: "application/json",
-      responseSchema: SCORING_SCHEMA,
-      temperature: 0.4,
-      thinkingConfig: { thinkingBudget: 128 },
-      maxOutputTokens: 3072,
-    },
+    });
+
+  const t0 = Date.now();
+  const attempts = [
+    callScoring(OCR_MODEL, false).then(
+      (res) => ({ text: res.text ?? null, source: OCR_MODEL, ok: !!res.text }),
+      (err) => ({ text: null as string | null, source: OCR_MODEL, ok: false, err })
+    ),
+    callScoring(SCORING_MODEL, true).then(
+      (res) => ({ text: res.text ?? null, source: SCORING_MODEL, ok: !!res.text }),
+      (err) => ({ text: null as string | null, source: SCORING_MODEL, ok: false, err })
+    ),
+  ];
+
+  type Winner = { text: string; source: string };
+  const winnerBox: { value: Winner | null } = { value: null };
+  let lastErr: unknown = null;
+  await new Promise<void>((resolve) => {
+    let settled = 0;
+    for (const p of attempts) {
+      p.then((r) => {
+        settled++;
+        if (r.ok && r.text && !winnerBox.value) {
+          winnerBox.value = { text: r.text, source: r.source };
+          resolve();
+          return;
+        }
+        if ("err" in r) lastErr = r.err;
+        if (settled === attempts.length) resolve();
+      });
+    }
   });
 
-  const text = res.text;
+  const won = winnerBox.value;
+  if (!won) {
+    throw lastErr ?? new Error("Scoring: both models failed");
+  }
+  console.log(`Scoring won by ${won.source} in ${Date.now() - t0}ms`);
+
+  const text = won.text;
   if (!text) throw new Error("Empty scoring response");
   return JSON.parse(text) as ScoringResult;
 }

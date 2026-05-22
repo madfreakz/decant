@@ -110,7 +110,7 @@ export default function ScanPage() {
         clearTimeout(timer);
         cleanup();
         try {
-          const MAX = 1024; // OCR only needs legibility, not display quality
+          const MAX = 768; // OCR text legibility — smaller = faster mobile upload
           const ratio = Math.min(MAX / img.naturalWidth, MAX / img.naturalHeight, 1);
           const w = Math.round(img.naturalWidth * ratio);
           const h = Math.round(img.naturalHeight * ratio);
