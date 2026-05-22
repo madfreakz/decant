@@ -4,12 +4,17 @@ type Props = {
   notes: string;
   score: number;
   price: number | null;
-  variant: "safer" | "wild";
+  variant: "safer" | "wild" | "verdict";
   onClick?: () => void;
 };
 
 export function AlternatePill({ label, wineName, notes, score, price, variant, onClick }: Props) {
-  const accent = variant === "safer" ? "var(--color-bottle-green)" : "var(--color-aged-gold)";
+  const accent =
+    variant === "safer"
+      ? "var(--color-bottle-green)"
+      : variant === "verdict"
+      ? "var(--color-bordeaux)"
+      : "var(--color-aged-gold)";
   return (
     <button
       onClick={onClick}

@@ -52,7 +52,6 @@ const FULL_LIST_SCORES = [
 export default function DemoPage() {
   const [view, setView] = useState<"verdict" | "recognition" | "processing" | "list">("verdict");
   const [showFullList, setShowFullList] = useState(false);
-  const [expanded, setExpanded] = useState(false);
 
   return (
     <main className="min-h-dvh px-5 py-8 max-w-md mx-auto">
@@ -86,8 +85,6 @@ export default function DemoPage() {
             wine={SAMPLE_WINE}
             scored={SAMPLE_SCORE}
             enrichment={SAMPLE_ENRICHMENT}
-            expanded={expanded}
-            onExpand={() => setExpanded((v) => !v)}
           />
           <div className="mt-4 flex gap-3 overflow-hidden">
             <AlternatePill

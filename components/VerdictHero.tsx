@@ -11,14 +11,20 @@ type Props = {
   wine: ScannedWine;
   scored: ScoredWine;
   enrichment?: Enrichment | null;
-  expanded?: boolean;
-  onExpand?: () => void;
+  heroLabel?: string;
 };
 
-export function VerdictHero({ wine, scored, enrichment, expanded, onExpand }: Props) {
+export function VerdictHero({ wine, scored, enrichment, heroLabel = "Tonight's verdict" }: Props) {
   const conf = scored.confidence;
   const confColor =
     conf === "high" ? "var(--color-bordeaux)" : conf === "medium" ? "var(--color-aged-gold)" : "var(--color-paper-shadow)";
+
+  // Show notes + reasoning together when they differ. If they're effectively
+  // the same string (sometimes the model echoes), suppress the duplicate.
+  const showBoth =
+    scored.notes &&
+    scored.reasoning &&
+    scored.notes.toLowerCase().trim() !== scored.reasoning.toLowerCase().trim();
 
   return (
     <article
@@ -36,7 +42,7 @@ export function VerdictHero({ wine, scored, enrichment, expanded, onExpand }: Pr
           className="font-display italic text-sm tracking-wide"
           style={{ color: "var(--color-kraft)" }}
         >
-          Tonight's verdict
+          {heroLabel}
         </span>
       </header>
 
@@ -96,24 +102,32 @@ export function VerdictHero({ wine, scored, enrichment, expanded, onExpand }: Pr
 
       <p
         className="mt-5 font-display italic text-lg leading-snug"
-        style={{ color: "var(--color-ink)", opacity: 0.85 }}
+        style={{ color: "var(--color-ink)", opacity: 0.9 }}
       >
-        {expanded ? scored.reasoning : (scored.notes || scored.reasoning)}
+        {scored.notes || scored.reasoning}
       </p>
+      {showBoth && (
+        <p
+          className="mt-2 font-display italic text-sm leading-snug"
+          style={{ color: "var(--color-kraft)" }}
+        >
+          {scored.reasoning}
+        </p>
+      )}
 
-      {expanded && enrichment && (
+      {enrichment && (enrichment.avg_rating != null || enrichment.food_pairings.length > 0) && (
         <div
-          className="mt-5 pt-5"
+          className="mt-5 pt-5 flex flex-wrap items-baseline gap-x-4 gap-y-1"
           style={{ borderTop: "1px solid var(--color-paper-shadow)" }}
         >
           {enrichment.avg_rating != null && (
             <div className="text-sm" style={{ color: "var(--color-kraft)" }}>
-              Vivino community: <span className="font-mono">{enrichment.avg_rating.toFixed(1)}★</span>
+              Vivino <span className="font-mono">{enrichment.avg_rating.toFixed(1)}★</span>
             </div>
           )}
           {enrichment.food_pairings.length > 0 && (
             <div
-              className="mt-2 font-display italic text-sm"
+              className="font-display italic text-sm"
               style={{ color: "var(--color-kraft)" }}
             >
               Pairs with {enrichment.food_pairings.slice(0, 2).join(", ")}.
@@ -121,17 +135,6 @@ export function VerdictHero({ wine, scored, enrichment, expanded, onExpand }: Pr
           )}
         </div>
       )}
-
-      <footer className="mt-6 flex items-center justify-end">
-        <button
-          onClick={onExpand}
-          className="text-sm tracking-wide"
-          style={{ color: "var(--color-ink)", opacity: 0.6 }}
-          aria-label={expanded ? "Collapse" : "Expand"}
-        >
-          {expanded ? "▲" : "▼"}
-        </button>
-      </footer>
     </article>
   );
 }

@@ -45,7 +45,7 @@ export default function ScanPage() {
   const [scoring, setScoring] = useState<ScoringResult | null>(null);
   const [recognitions, setRecognitions] = useState<Record<number, RecognitionData["rated"]>>({});
   const [enrichments, setEnrichments] = useState<Record<number, EnrichmentData["vivino"]>>({});
-  const [verdictExpanded, setVerdictExpanded] = useState(false);
+  const [activePickIdx, setActivePickIdx] = useState<number | null>(null);
   const [showFullList, setShowFullList] = useState(false);
   const [enrichmentUnavailable, setEnrichmentUnavailable] = useState(false);
   const [budget, setBudget] = useState(80);
@@ -263,6 +263,7 @@ export default function ScanPage() {
     setScoring(null);
     setRecognitions({});
     setEnrichments({});
+    setActivePickIdx(null);
 
     const effectiveBudget = budget >= 300 ? undefined : budget;
     try {
@@ -316,7 +317,7 @@ export default function ScanPage() {
     setScoring(null);
     setRecognitions({});
     setEnrichments({});
-    setVerdictExpanded(false);
+    setActivePickIdx(null);
     setShowFullList(false);
     setEnrichmentUnavailable(false);
     setBudget(80);
@@ -425,17 +426,24 @@ export default function ScanPage() {
   }
 
   if (state.phase === "verdict" && scoring) {
-    const verdictIdx = scoring.verdict_index;
-    const verdictScore = scoring.scored.find((s) => s.index === verdictIdx);
-    const verdictWine = allWines[verdictIdx];
-    const verdictRecognition = recognitions[verdictIdx];
+    // The three picks (verdict + safer + wild) and their canonical labels/variants.
+    type PickRole = { idx: number; label: string; variant: "verdict" | "safer" | "wild" };
+    const allPicks: PickRole[] = [
+      { idx: scoring.verdict_index, label: "Tonight's verdict", variant: "verdict" },
+      ...(scoring.safer_pick_index != null
+        ? [{ idx: scoring.safer_pick_index, label: "Closer to home", variant: "safer" as const }]
+        : []),
+      ...(scoring.wild_card_index != null
+        ? [{ idx: scoring.wild_card_index, label: "Worth a gamble", variant: "wild" as const }]
+        : []),
+    ];
 
-    const saferIdx = scoring.safer_pick_index;
-    const wildIdx = scoring.wild_card_index;
-    const saferWine = saferIdx != null ? allWines[saferIdx] : null;
-    const wildWine = wildIdx != null ? allWines[wildIdx] : null;
-    const saferScore = saferIdx != null ? scoring.scored.find((s) => s.index === saferIdx) : null;
-    const wildScore = wildIdx != null ? scoring.scored.find((s) => s.index === wildIdx) : null;
+    const currentIdx = activePickIdx ?? scoring.verdict_index;
+    const currentRole = allPicks.find((p) => p.idx === currentIdx) ?? allPicks[0];
+    const currentScore = scoring.scored.find((s) => s.index === currentIdx);
+    const currentWine = allWines[currentIdx];
+    const currentRecognition = recognitions[currentIdx];
+    const otherPicks = allPicks.filter((p) => p.idx !== currentIdx);
 
     return (
       <main className="min-h-dvh px-5 py-8 max-w-md mx-auto">
@@ -450,60 +458,43 @@ export default function ScanPage() {
           <WaxSeal size={28} />
         </header>
 
-        {verdictRecognition ? (
-          <>
-            <RecognitionCard
-              winery={verdictRecognition.winery}
-              wineName={verdictRecognition.wine_name}
-              vintage={verdictRecognition.vintage}
-              region={verdictRecognition.region}
-              userRating={verdictRecognition.user_rating}
-              ratedAt={verdictRecognition.rated_at}
-            />
-            {verdictScore && (
-              <div className="mt-4 text-center">
-                <button
-                  className="text-sm font-display italic"
-                  style={{ color: "var(--color-bordeaux)" }}
-                  onClick={() => setVerdictExpanded((v) => !v)}
-                >
-                  Still scoring {verdictScore.score.toFixed(1)} tonight →
-                </button>
-              </div>
-            )}
-          </>
-        ) : verdictWine && verdictScore ? (
+        {currentRecognition ? (
+          <RecognitionCard
+            winery={currentRecognition.winery}
+            wineName={currentRecognition.wine_name}
+            vintage={currentRecognition.vintage}
+            region={currentRecognition.region}
+            userRating={currentRecognition.user_rating}
+            ratedAt={currentRecognition.rated_at}
+          />
+        ) : currentWine && currentScore ? (
           <VerdictHero
-            wine={verdictWine}
-            scored={verdictScore}
-            enrichment={enrichments[verdictIdx] ?? null}
-            expanded={verdictExpanded}
-            onExpand={() => setVerdictExpanded((v) => !v)}
+            wine={currentWine}
+            scored={currentScore}
+            enrichment={enrichments[currentIdx] ?? null}
+            heroLabel={currentRole.label}
           />
         ) : null}
 
-        {(saferWine || wildWine) && (
+        {otherPicks.length > 0 && (
           <div className="mt-4 flex gap-3 overflow-hidden">
-            {saferWine && saferScore && (
-              <AlternatePill
-                label="Closer to home"
-                wineName={[saferWine.winery, saferWine.name].filter(Boolean).join(" ")}
-                notes={saferScore.notes}
-                score={saferScore.score}
-                price={saferWine.price_usd}
-                variant="safer"
-              />
-            )}
-            {wildWine && wildScore && (
-              <AlternatePill
-                label="Worth a gamble"
-                wineName={[wildWine.winery, wildWine.name].filter(Boolean).join(" ")}
-                notes={wildScore.notes}
-                score={wildScore.score}
-                price={wildWine.price_usd}
-                variant="wild"
-              />
-            )}
+            {otherPicks.map((pick) => {
+              const w = allWines[pick.idx];
+              const s = scoring.scored.find((x) => x.index === pick.idx);
+              if (!w || !s) return null;
+              return (
+                <AlternatePill
+                  key={pick.idx}
+                  label={pick.label}
+                  wineName={[w.winery, w.name].filter(Boolean).join(" ")}
+                  notes={s.notes}
+                  score={s.score}
+                  price={w.price_usd}
+                  variant={pick.variant}
+                  onClick={() => setActivePickIdx(pick.idx)}
+                />
+              );
+            })}
           </div>
         )}
 
