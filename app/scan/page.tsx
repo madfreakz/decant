@@ -307,6 +307,7 @@ export default function ScanPage() {
     setVerdictExpanded(false);
     setShowFullList(false);
     setEnrichmentUnavailable(false);
+    setBudget(80);
   }
 
   // ---- Render phases ----
