@@ -60,8 +60,16 @@ export async function POST(req: NextRequest) {
     const elapsed = Date.now() - t0;
     return NextResponse.json({ wines, elapsed_ms: elapsed });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("ocrWineList failed:", message);
-    return NextResponse.json({ error: message, wines: [] }, { status: 500 });
+    const raw = err instanceof Error ? err.message : String(err);
+    console.error("ocrWineList failed:", raw);
+    // Map common Gemini errors to short, user-friendly messages
+    const friendly = /503|UNAVAILABLE|overload|high demand/i.test(raw)
+      ? "Gemini is overloaded right now. Try again in 30 seconds."
+      : /429|RESOURCE_EXHAUSTED|quota/i.test(raw)
+      ? "Hit the Gemini rate limit. Wait a minute."
+      : /timeout|deadline/i.test(raw)
+      ? "OCR timed out. Try a smaller, closer shot."
+      : "OCR failed. Retake the photo.";
+    return NextResponse.json({ error: friendly, wines: [] }, { status: 500 });
   }
 }

@@ -63,10 +63,15 @@ const OCR_SCHEMA = {
   required: ["wines"],
 };
 
-export async function ocrWineList(imageBase64: string, mimeType: string): Promise<ScannedWine[]> {
+function isOverloadError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /503|UNAVAILABLE|overload|high demand/i.test(msg);
+}
+
+async function callOCR(model: string, imageBase64: string, mimeType: string): Promise<string | null> {
   const ai = getAI();
   const res = await ai.models.generateContent({
-    model: OCR_MODEL,
+    model,
     contents: [
       {
         role: "user",
@@ -83,16 +88,38 @@ export async function ocrWineList(imageBase64: string, mimeType: string): Promis
       maxOutputTokens: 8192,
     },
   });
+  return res.text ?? null;
+}
 
-  const text = res.text;
-  if (!text) return [];
-  try {
-    const parsed = JSON.parse(text) as { wines: ScannedWine[] };
-    return parsed.wines ?? [];
-  } catch (err) {
-    console.error("OCR JSON parse failed:", err, text.slice(0, 200));
-    return [];
+export async function ocrWineList(imageBase64: string, mimeType: string): Promise<ScannedWine[]> {
+  // Try OCR_MODEL up to 3 times with backoff for transient 503s, then fall
+  // back to the heavier scoring model (more reliably available) for a final try.
+  const models = [OCR_MODEL, OCR_MODEL, OCR_MODEL, SCORING_MODEL];
+  const delays = [0, 1000, 3000, 0];
+  let lastErr: unknown = null;
+
+  for (let i = 0; i < models.length; i++) {
+    if (delays[i] > 0) await new Promise((r) => setTimeout(r, delays[i]));
+    try {
+      const text = await callOCR(models[i], imageBase64, mimeType);
+      if (!text) {
+        lastErr = new Error("Empty response from Gemini");
+        continue;
+      }
+      try {
+        const parsed = JSON.parse(text) as { wines: ScannedWine[] };
+        return parsed.wines ?? [];
+      } catch (parseErr) {
+        console.error("OCR JSON parse failed:", parseErr, text.slice(0, 200));
+        return [];
+      }
+    } catch (err) {
+      lastErr = err;
+      console.warn(`OCR attempt ${i + 1}/${models.length} on ${models[i]} failed:`, err instanceof Error ? err.message : err);
+      if (!isOverloadError(err)) break; // non-retryable error
+    }
   }
+  throw lastErr ?? new Error("OCR failed");
 }
 
 // ---- Scoring: wine list → ranked verdicts ----
