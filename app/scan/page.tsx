@@ -82,25 +82,40 @@ export default function ScanPage() {
     uploadPage(id, file);
   }
 
-  async function compressImage(file: File): Promise<Blob> {
-    const bitmap = await createImageBitmap(file);
-    const MAX = 1920;
-    const ratio = Math.min(MAX / bitmap.width, MAX / bitmap.height, 1);
-    const w = Math.round(bitmap.width * ratio);
-    const h = Math.round(bitmap.height * ratio);
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    canvas.getContext("2d")!.drawImage(bitmap, 0, 0, w, h);
-    return new Promise((resolve) =>
-      canvas.toBlob((b) => resolve(b!), "image/jpeg", 0.85)
-    );
+  function compressImage(file: File): Promise<Blob> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const MAX = 1920;
+        const ratio = Math.min(MAX / img.naturalWidth, MAX / img.naturalHeight, 1);
+        const w = Math.round(img.naturalWidth * ratio);
+        const h = Math.round(img.naturalHeight * ratio);
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
+        canvas.toBlob(
+          (b) => (b ? resolve(b) : reject(new Error("toBlob returned null"))),
+          "image/jpeg",
+          0.85
+        );
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("img load failed")); };
+      img.src = url;
+    });
   }
 
   async function uploadPage(id: string, file: File) {
-    const compressed = await compressImage(file);
+    let payload: Blob = file;
+    try {
+      payload = await compressImage(file);
+    } catch (err) {
+      console.warn("Image compression failed, uploading original:", err);
+    }
     const form = new FormData();
-    form.append("image", compressed, "page.jpg");
+    form.append("image", payload, "page.jpg");
     try {
       const res = await fetch("/api/ocr-page", { method: "POST", body: form });
       const data = (await res.json()) as { wines?: ScannedWine[]; error?: string };
