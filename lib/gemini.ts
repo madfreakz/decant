@@ -82,6 +82,8 @@ export async function ocrWineList(imageBase64: string, mimeType: string): Promis
       responseMimeType: "application/json",
       responseSchema: OCR_SCHEMA,
       temperature: 0.1,
+      thinkingConfig: { thinkingBudget: 128 },
+      maxOutputTokens: 8192,
     },
   });
 
@@ -203,6 +205,8 @@ ${wineLines}`;
       responseMimeType: "application/json",
       responseSchema: SCORING_SCHEMA,
       temperature: 0.4,
+      thinkingConfig: { thinkingBudget: 512 },
+      maxOutputTokens: 8192,
     },
   });
 
