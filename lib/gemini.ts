@@ -145,11 +145,36 @@ export async function ocrWineList(imageBase64: string, mimeType: string): Promis
 
   try {
     const parsed = JSON.parse(won.text) as { wines: ScannedWine[] };
-    return parsed.wines ?? [];
+    return (parsed.wines ?? []).map(sanitizeWine);
   } catch (parseErr) {
     console.error("OCR JSON parse failed:", parseErr, won.text.slice(0, 200));
     return [];
   }
+}
+
+// Replace literal "null", "n/a", "—", empty strings with proper nulls.
+// Gemini sometimes returns the string "null" for fields it can't determine
+// instead of omitting them, and the schema's required fields can't be null.
+function sanitizeWine(w: ScannedWine): ScannedWine {
+  const clean = (s: string | null | undefined): string => {
+    if (!s) return "";
+    const t = String(s).trim();
+    if (!t || /^(null|n\/a|none|undefined|—|-)$/i.test(t)) return "";
+    return t;
+  };
+  const cleanOrNull = (s: string | null | undefined): string | null => {
+    const t = clean(s);
+    return t || null;
+  };
+  return {
+    winery: clean(w.winery),
+    name: clean(w.name),
+    vintage: w.vintage ?? null,
+    region: cleanOrNull(w.region),
+    varietal: cleanOrNull(w.varietal),
+    price_usd: typeof w.price_usd === "number" ? w.price_usd : null,
+    by_glass: !!w.by_glass,
+  };
 }
 
 // ---- Scoring: wine list → ranked verdicts ----
@@ -316,5 +341,19 @@ ${wineLines}`;
 
   const text = won.text;
   if (!text) throw new Error("Empty scoring response");
-  return JSON.parse(text) as ScoringResult;
+  const result = JSON.parse(text) as ScoringResult;
+  // Sanitize: ensure required string fields don't surface "null" / empty.
+  const cleanStr = (s: string | null | undefined, fallback: string): string => {
+    if (!s) return fallback;
+    const t = String(s).trim();
+    if (!t || /^(null|n\/a|none|undefined)$/i.test(t)) return fallback;
+    return t;
+  };
+  result.scored = result.scored.map((s) => ({
+    ...s,
+    reasoning: cleanStr(s.reasoning, "Strong pick for Mark."),
+    notes: cleanStr(s.notes, cleanStr(s.reasoning, "Solid choice.")),
+    skip_reason: s.skip_reason && /^(null|n\/a|none)$/i.test(String(s.skip_reason).trim()) ? null : s.skip_reason,
+  }));
+  return result;
 }

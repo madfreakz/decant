@@ -110,7 +110,7 @@ export default function ScanPage() {
         clearTimeout(timer);
         cleanup();
         try {
-          const MAX = 768; // OCR text legibility — smaller = faster mobile upload
+          const MAX = 640; // smallest reliable size for OCR of wine list text
           const ratio = Math.min(MAX / img.naturalWidth, MAX / img.naturalHeight, 1);
           const w = Math.round(img.naturalWidth * ratio);
           const h = Math.round(img.naturalHeight * ratio);
@@ -473,7 +473,7 @@ export default function ScanPage() {
             {saferWine && saferScore && (
               <AlternatePill
                 label="Closer to home"
-                wineName={`${saferWine.winery} ${saferWine.name}`}
+                wineName={[saferWine.winery, saferWine.name].filter(Boolean).join(" ")}
                 notes={saferScore.notes}
                 score={saferScore.score}
                 price={saferWine.price_usd}
@@ -483,7 +483,7 @@ export default function ScanPage() {
             {wildWine && wildScore && (
               <AlternatePill
                 label="Worth a gamble"
-                wineName={`${wildWine.winery} ${wildWine.name}`}
+                wineName={[wildWine.winery, wildWine.name].filter(Boolean).join(" ")}
                 notes={wildScore.notes}
                 score={wildScore.score}
                 price={wildWine.price_usd}
