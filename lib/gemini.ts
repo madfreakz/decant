@@ -8,7 +8,7 @@ function getAI(): GoogleGenAI {
   return new GoogleGenAI({ apiKey });
 }
 
-const OCR_MODEL = "gemini-2.0-flash";
+const OCR_MODEL = "gemini-2.5-flash-lite";
 const SCORING_MODEL = "gemini-2.5-flash";
 
 // ---- OCR: image → structured wine list ----
