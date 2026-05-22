@@ -82,9 +82,25 @@ export default function ScanPage() {
     uploadPage(id, file);
   }
 
+  async function compressImage(file: File): Promise<Blob> {
+    const bitmap = await createImageBitmap(file);
+    const MAX = 1920;
+    const ratio = Math.min(MAX / bitmap.width, MAX / bitmap.height, 1);
+    const w = Math.round(bitmap.width * ratio);
+    const h = Math.round(bitmap.height * ratio);
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext("2d")!.drawImage(bitmap, 0, 0, w, h);
+    return new Promise((resolve) =>
+      canvas.toBlob((b) => resolve(b!), "image/jpeg", 0.85)
+    );
+  }
+
   async function uploadPage(id: string, file: File) {
+    const compressed = await compressImage(file);
     const form = new FormData();
-    form.append("image", file);
+    form.append("image", compressed, "page.jpg");
     try {
       const res = await fetch("/api/ocr-page", { method: "POST", body: form });
       const data = (await res.json()) as { wines?: ScannedWine[]; error?: string };

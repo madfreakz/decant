@@ -1,6 +1,6 @@
 {
   "functions": {
-    "app/api/ocr-page/route.ts": { "maxDuration": 30 },
+    "app/api/ocr-page/route.ts": { "maxDuration": 60 },
     "app/api/recommend/route.ts": { "maxDuration": 60 }
   }
 }
