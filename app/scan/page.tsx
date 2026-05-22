@@ -262,11 +262,13 @@ export default function ScanPage() {
         throw new Error(`Bad response: ${res.status}`);
       }
       const localRecognitions: Record<number, RecognitionData["rated"]> = {};
+      let gotScored = false;
       await consumeSSE(res.body, (event) => {
         if (event.type === "recognition") {
           localRecognitions[event.index] = event.rated;
           setRecognitions((prev) => ({ ...prev, [event.index]: event.rated }));
         } else if (event.type === "scored") {
+          gotScored = true;
           setScoring(event.result);
           dispatch({ type: "SET_PHASE", phase: "verdict" });
 
@@ -291,8 +293,15 @@ export default function ScanPage() {
           setEnrichments((prev) => ({ ...prev, [event.index]: event.vivino }));
         } else if (event.type === "enrichment_unavailable") {
           setEnrichmentUnavailable(true);
+        } else if (event.type === "error") {
+          console.error("Server error event:", event.message);
         }
       });
+      // Stream closed. If we never got the verdict, the server died or timed out.
+      if (!gotScored) {
+        console.error("SSE closed without scored event — server timeout or crash");
+        dispatch({ type: "SET_PHASE", phase: "capture" });
+      }
     } catch (err) {
       console.error("Scoring failed:", err);
       dispatch({ type: "SET_PHASE", phase: "capture" });

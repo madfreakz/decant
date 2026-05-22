@@ -34,6 +34,21 @@ export async function POST(req: NextRequest) {
 
   const stream = new ReadableStream({
     async start(controller) {
+      // Force Vercel to flush response headers + start the connection.
+      // Without this, the Node.js runtime buffers SSE until the function
+      // completes, hiding the "scored" event behind ~20s of Vivino enrichment.
+      controller.enqueue(new TextEncoder().encode(": ok\n\n"));
+
+      // Keep the connection alive with periodic comments so any intermediate
+      // proxy doesn't buffer waiting for more bytes.
+      const heartbeat = setInterval(() => {
+        try {
+          controller.enqueue(new TextEncoder().encode(": ping\n\n"));
+        } catch {
+          // controller already closed
+        }
+      }, 2000);
+
       try {
         // 1. Recognition pass — fuzzy match against 405 already-rated wines
         const recognitionMatches: Record<number, { wineName: string; rating: number; date: string }> = {};
@@ -64,21 +79,26 @@ export async function POST(req: NextRequest) {
         const scoringResult = await scoreWines(wines, recognitionMatches, wineType, budget);
         send(controller, { type: "scored", result: scoringResult });
 
-        // 3. Vivino enrichment — top 5 wines (verdict + alternates + next 2 scored), sequential
+        // 3. Vivino enrichment — top 3 only (verdict + 2 alternates), with a
+        // total time budget so a slow Vivino doesn't burn the function timeout.
         const sortedByScore = [...scoringResult.scored].sort((a, b) => b.score - a.score);
-        const topIndices = sortedByScore.slice(0, 5).map((s) => s.index);
+        const topIndices = sortedByScore.slice(0, 3).map((s) => s.index);
+        const enrichDeadline = Date.now() + 12_000; // 12s total enrichment budget
 
         if (!process.env.VIVINO_SESSION_COOKIE) {
           send(controller, { type: "enrichment_unavailable", reason: "Vivino cookie not configured" });
         } else {
           for (const idx of topIndices) {
+            if (Date.now() > enrichDeadline) {
+              console.warn("Vivino enrichment budget exhausted — skipping remaining wines");
+              break;
+            }
             const wine = wines[idx];
             const query = [wine.winery, wine.name, wine.vintage].filter(Boolean).join(" ").trim();
             if (!query) continue;
             try {
               const hits = await searchWines(query, 5);
               if (hits.length === 0) continue;
-              // Score each hit by name similarity to filter out unrelated top results
               const wineryLower = (wine.winery ?? "").toLowerCase();
               const best = hits
                 .map((h) => {
@@ -91,7 +111,6 @@ export async function POST(req: NextRequest) {
                   return { hit: h, score };
                 })
                 .sort((a, b) => b.score - a.score)[0];
-              // Require at least a winery hint match before claiming "enrichment"
               if (best.score < 8) continue;
               send(controller, {
                 type: "enrichment",
@@ -110,10 +129,11 @@ export async function POST(req: NextRequest) {
         }
 
         send(controller, { type: "done" });
-        controller.close();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         send(controller, { type: "error", message });
+      } finally {
+        clearInterval(heartbeat);
         controller.close();
       }
     },

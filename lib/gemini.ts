@@ -92,10 +92,11 @@ async function callOCR(model: string, imageBase64: string, mimeType: string): Pr
 }
 
 export async function ocrWineList(imageBase64: string, mimeType: string): Promise<ScannedWine[]> {
-  // Try OCR_MODEL up to 3 times with backoff for transient 503s, then fall
-  // back to the heavier scoring model (more reliably available) for a final try.
-  const models = [OCR_MODEL, OCR_MODEL, OCR_MODEL, SCORING_MODEL];
-  const delays = [0, 1000, 3000, 0];
+  // Lite is fast (~1.3s) but flakes under load. If first attempt fails with
+  // overload, skip the retry-the-lite-model dance — flash is on a different
+  // quota pool and usually available immediately.
+  const models = [OCR_MODEL, SCORING_MODEL];
+  const delays = [0, 0];
   let lastErr: unknown = null;
 
   for (let i = 0; i < models.length; i++) {
@@ -244,8 +245,8 @@ ${wineLines}`;
       responseMimeType: "application/json",
       responseSchema: SCORING_SCHEMA,
       temperature: 0.4,
-      thinkingConfig: { thinkingBudget: 256 },
-      maxOutputTokens: 4096,
+      thinkingConfig: { thinkingBudget: 128 },
+      maxOutputTokens: 3072,
     },
   });
 
