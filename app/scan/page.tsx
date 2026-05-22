@@ -250,7 +250,6 @@ export default function ScanPage() {
     setRecognitions({});
     setEnrichments({});
 
-    // budget >= 300 means "no limit" — don't constrain
     const effectiveBudget = budget >= 300 ? undefined : budget;
     try {
       const res = await fetch("/api/recommend", {
@@ -258,49 +257,39 @@ export default function ScanPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ wines: allWines, wineType, budget: effectiveBudget }),
       });
-      if (!res.ok || !res.body) {
-        throw new Error(`Bad response: ${res.status}`);
-      }
-      const localRecognitions: Record<number, RecognitionData["rated"]> = {};
-      let gotScored = false;
-      await consumeSSE(res.body, (event) => {
-        if (event.type === "recognition") {
-          localRecognitions[event.index] = event.rated;
-          setRecognitions((prev) => ({ ...prev, [event.index]: event.rated }));
-        } else if (event.type === "scored") {
-          gotScored = true;
-          setScoring(event.result);
-          dispatch({ type: "SET_PHASE", phase: "verdict" });
-
-          // Persist verdict to journal for the home-screen scroll
-          const verdictIdx = event.result.verdict_index;
-          const verdictWine = allWines[verdictIdx];
-          const verdictScore = event.result.scored.find(
-            (s: ScoringResult["scored"][number]) => s.index === verdictIdx
-          );
-          const recognition = localRecognitions[verdictIdx];
-          if (verdictWine && verdictScore) {
-            saveVerdict({
-              winery: recognition?.winery ?? verdictWine.winery,
-              wine_name: recognition?.wine_name ?? verdictWine.name,
-              vintage: recognition?.vintage ?? verdictWine.vintage,
-              score: recognition?.user_rating ?? verdictScore.score,
-              reasoning: verdictScore.reasoning,
-              recognized: !!recognition,
-            });
-          }
-        } else if (event.type === "enrichment") {
-          setEnrichments((prev) => ({ ...prev, [event.index]: event.vivino }));
-        } else if (event.type === "enrichment_unavailable") {
-          setEnrichmentUnavailable(true);
-        } else if (event.type === "error") {
-          console.error("Server error event:", event.message);
-        }
-      });
-      // Stream closed. If we never got the verdict, the server died or timed out.
-      if (!gotScored) {
-        console.error("SSE closed without scored event — server timeout or crash");
+      const data = (await res.json()) as {
+        scoring?: ScoringResult;
+        recognitions?: Record<number, RecognitionData["rated"]>;
+        enrichments?: Record<number, EnrichmentData["vivino"]>;
+        enrichmentUnavailable?: boolean;
+        error?: string;
+      };
+      if (!res.ok || !data.scoring) {
+        console.error("Recommend failed:", res.status, data.error);
         dispatch({ type: "SET_PHASE", phase: "capture" });
+        return;
+      }
+
+      setRecognitions(data.recognitions ?? {});
+      setEnrichments(data.enrichments ?? {});
+      if (data.enrichmentUnavailable) setEnrichmentUnavailable(true);
+      setScoring(data.scoring);
+      dispatch({ type: "SET_PHASE", phase: "verdict" });
+
+      // Persist verdict to journal for the home-screen scroll
+      const verdictIdx = data.scoring.verdict_index;
+      const verdictWine = allWines[verdictIdx];
+      const verdictScore = data.scoring.scored.find((s) => s.index === verdictIdx);
+      const recognition = data.recognitions?.[verdictIdx];
+      if (verdictWine && verdictScore) {
+        saveVerdict({
+          winery: recognition?.winery ?? verdictWine.winery,
+          wine_name: recognition?.wine_name ?? verdictWine.name,
+          vintage: recognition?.vintage ?? verdictWine.vintage,
+          score: recognition?.user_rating ?? verdictScore.score,
+          reasoning: verdictScore.reasoning,
+          recognized: !!recognition,
+        });
       }
     } catch (err) {
       console.error("Scoring failed:", err);
@@ -626,35 +615,3 @@ export default function ScanPage() {
   );
 }
 
-type SSEEventIn =
-  | { type: "recognition"; index: number; rated: RecognitionData["rated"] }
-  | { type: "scored"; result: ScoringResult }
-  | { type: "enrichment"; index: number; vivino: EnrichmentData["vivino"] }
-  | { type: "enrichment_unavailable"; reason: string }
-  | { type: "done" }
-  | { type: "error"; message: string };
-
-async function consumeSSE(
-  body: ReadableStream<Uint8Array>,
-  onEvent: (event: SSEEventIn) => void
-) {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const parts = buffer.split("\n\n");
-    buffer = parts.pop() ?? "";
-    for (const part of parts) {
-      const line = part.split("\n").find((l) => l.startsWith("data: "));
-      if (!line) continue;
-      try {
-        onEvent(JSON.parse(line.slice(6)));
-      } catch (err) {
-        console.warn("SSE parse error:", err);
-      }
-    }
-  }
-}
