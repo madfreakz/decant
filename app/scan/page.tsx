@@ -65,11 +65,11 @@ export default function ScanPage() {
   }, [state.pages, state.phase]);
 
   // Pre-warm Vercel lambdas so the user's first OCR call doesn't pay cold-start.
-  // Fires the moment /scan mounts. Subsequent fires when the user reaches
-  // the type-select screen prime the recommend lambda before they pick a type.
+  // Includes /api/parse-wines for the Tesseract path.
   useEffect(() => {
     fetch("/api/ocr-page").catch(() => {});
     fetch("/api/recommend").catch(() => {});
+    fetch("/api/parse-wines").catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -77,6 +77,34 @@ export default function ScanPage() {
       fetch("/api/recommend").catch(() => {});
     }
   }, [state.phase]);
+
+  // Lazy-load Tesseract.js worker on mount. The first call pulls down ~10MB of
+  // language data; doing it here means it's ready by the time the user takes
+  // a photo. tesseractWorkerRef.current.recognize() runs in a Web Worker.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tesseractWorkerRef = useRef<any>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const Tesseract = await import("tesseract.js");
+        const worker = await Tesseract.createWorker("eng");
+        if (cancelled) {
+          await worker.terminate();
+          return;
+        }
+        tesseractWorkerRef.current = worker;
+        console.log("Tesseract worker ready");
+      } catch (err) {
+        console.warn("Tesseract preload failed (will rely on Gemini OCR):", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      tesseractWorkerRef.current?.terminate?.().catch(() => {});
+      tesseractWorkerRef.current = null;
+    };
+  }, []);
 
   const allWines: ScannedWine[] = useMemo(() => {
     const merged = state.pages.flatMap((p) => p.wines);
@@ -229,18 +257,61 @@ export default function ScanPage() {
     }
     console.log(`upload: ${(compressed.size / 1024).toFixed(0)} KB JPEG`);
 
-    const form = new FormData();
-    form.append("image", compressed, "page.jpg");
-    try {
+    // Race two OCR paths: Tesseract.js in-browser → text parse via Flash Lite,
+    // vs Gemini vision OCR directly. Whichever returns a valid wine list first
+    // wins. Tesseract path is usually faster on clean menus (no vision API
+    // round-trip); vision is the safety net for stylized/handwritten lists.
+    const t0 = performance.now();
+
+    const tesseractPath = (async (): Promise<ScannedWine[]> => {
+      const worker = tesseractWorkerRef.current;
+      if (!worker) throw new Error("Tesseract worker not ready");
+      const tess0 = performance.now();
+      const { data } = await worker.recognize(compressed);
+      const tessMs = Math.round(performance.now() - tess0);
+      const text = (data?.text ?? "").trim();
+      console.log(`Tesseract OCR done in ${tessMs}ms: ${text.length} chars`);
+      if (text.length < 40) throw new Error("Tesseract output too short — image likely unreadable");
+
+      const res = await fetch("/api/parse-wines", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const json = (await res.json()) as { wines?: ScannedWine[]; error?: string };
+      if (!res.ok || !json.wines || json.wines.length === 0) {
+        throw new Error(`parse-wines ${res.status}: ${json.error ?? "no wines"}`);
+      }
+      return json.wines;
+    })();
+
+    const visionPath = (async (): Promise<ScannedWine[]> => {
+      const form = new FormData();
+      form.append("image", compressed, "page.jpg");
       const res = await fetch("/api/ocr-page", { method: "POST", body: form });
       const data = (await res.json()) as { wines?: ScannedWine[]; error?: string };
-      if (!res.ok || !data.wines) {
-        failWith(`Server ${res.status}: ${data.error ?? "unknown error"}`);
-        return;
+      if (!res.ok || !data.wines || data.wines.length === 0) {
+        throw new Error(`ocr-page ${res.status}: ${data.error ?? "no wines"}`);
       }
-      dispatch({ type: "UPDATE_PAGE", id, patch: { status: "done", wines: data.wines, wineCount: data.wines.length } });
+      return data.wines;
+    })();
+
+    try {
+      // Promise.any: take whichever path returns a non-empty wine list first.
+      const wines = await Promise.any([tesseractPath, visionPath]);
+      const totalMs = Math.round(performance.now() - t0);
+      // Diagnostic: which path produced the result we used?
+      const tessWon = await Promise.race([
+        tesseractPath.then(() => true, () => false),
+        Promise.resolve(false),
+      ]);
+      console.log(`OCR done in ${totalMs}ms (${tessWon ? "tesseract" : "vision"} likely first)`);
+      dispatch({ type: "UPDATE_PAGE", id, patch: { status: "done", wines, wineCount: wines.length } });
     } catch (err) {
-      failWith(`Network error: ${err instanceof Error ? err.message : String(err)}`);
+      // Promise.any rejects with AggregateError when ALL paths failed
+      const aggregate = err as AggregateError;
+      const reasons = aggregate.errors?.map((e) => (e instanceof Error ? e.message : String(e))).join(" | ") ?? String(err);
+      failWith(`OCR failed: ${reasons}`);
     }
   }
 

@@ -177,6 +177,100 @@ function sanitizeWine(w: ScannedWine): ScannedWine {
   };
 }
 
+// ---- Parse: raw OCR text → structured wines ----
+// Used after Tesseract.js client-side OCR. The model only does text structuring,
+// not vision — much faster than the image OCR path.
+
+const PARSE_PROMPT = `You are parsing raw OCR text from a restaurant wine list. The text may contain OCR errors, broken lines, and noise. Reconstruct it into a clean structured list.
+
+Same field extraction rules as image OCR:
+- winery (producer name)
+- name (cuvée / wine name; may be empty)
+- vintage (4-digit year or null)
+- region (appellation or null)
+- varietal (grape or null)
+- price_usd (BOTTLE price as number, no symbols)
+- by_glass (true if only a glass price is shown)
+
+PRICES (critical — every wine has one):
+- "12/45" or "12 / 45" → glass 12, bottle 45 → return 45
+- "25 | 120" → return 120
+- Single number under a "By the Glass" header → glass price → set by_glass=true
+- Single number otherwise → bottle price → by_glass=false
+- Strip $ commas USD etc.
+
+Common OCR noise to ignore:
+- All-caps section headers (BUBBLES, CHARDONNAY, REDS, etc.)
+- Tasting notes, food pairings prose
+- Page numbers, decorative characters
+
+Be aggressive about extracting wines — if OCR garbled the producer name slightly, do your best partial reconstruction. Don't invent wines that aren't in the input.`;
+
+export async function parseWinesFromText(rawText: string): Promise<ScannedWine[]> {
+  const ai = getAI();
+  const t0 = Date.now();
+  // Race the same two models we use for image OCR; the input is just text so
+  // Lite usually wins easily.
+  const callParse = (model: string) =>
+    ai.models.generateContent({
+      model,
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: PARSE_PROMPT + "\n\n---\n\n" + rawText }],
+        },
+      ],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: OCR_SCHEMA,
+        temperature: 0.1,
+        maxOutputTokens: 4096,
+      },
+    });
+
+  const attempts = [
+    callParse(OCR_MODEL).then(
+      (res) => ({ text: res.text ?? null, source: OCR_MODEL, ok: !!res.text }),
+      (err) => ({ text: null as string | null, source: OCR_MODEL, ok: false, err })
+    ),
+    callParse(SCORING_MODEL).then(
+      (res) => ({ text: res.text ?? null, source: SCORING_MODEL, ok: !!res.text }),
+      (err) => ({ text: null as string | null, source: SCORING_MODEL, ok: false, err })
+    ),
+  ];
+
+  type Winner = { text: string; source: string };
+  const winnerBox: { value: Winner | null } = { value: null };
+  let lastErr: unknown = null;
+  await new Promise<void>((resolve) => {
+    let settled = 0;
+    for (const p of attempts) {
+      p.then((r) => {
+        settled++;
+        if (r.ok && r.text && !winnerBox.value) {
+          winnerBox.value = { text: r.text, source: r.source };
+          resolve();
+          return;
+        }
+        if ("err" in r) lastErr = r.err;
+        if (settled === attempts.length) resolve();
+      });
+    }
+  });
+
+  const won = winnerBox.value;
+  if (!won) throw lastErr ?? new Error("Text parse: both models failed");
+  console.log(`Text parse won by ${won.source} in ${Date.now() - t0}ms`);
+
+  try {
+    const parsed = JSON.parse(won.text) as { wines: ScannedWine[] };
+    return (parsed.wines ?? []).map(sanitizeWine);
+  } catch (parseErr) {
+    console.error("parseWinesFromText JSON parse failed:", parseErr, won.text.slice(0, 200));
+    return [];
+  }
+}
+
 // ---- Scoring: wine list → ranked verdicts ----
 
 const SCORING_PROMPT = `You are Mark's sommelier. He has a deeply specific taste profile (below). Given a wine list, score each wine 1.0-5.0 (one decimal) on how much Mark would like it, based on his profile.
