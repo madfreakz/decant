@@ -1,14 +1,11 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { TASTE_PROFILE } from "./taste-profile";
 
-// Lazy init — never instantiate at module level in Next.js (SSR crashes)
-let _ai: GoogleGenAI | null = null;
+// Always create a fresh instance — no singleton, no cross-call state
 function getAI(): GoogleGenAI {
-  if (_ai) return _ai;
   const apiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY or GOOGLE_API_KEY must be set");
-  _ai = new GoogleGenAI({ apiKey });
-  return _ai;
+  return new GoogleGenAI({ apiKey });
 }
 
 const MODEL = "gemini-2.5-flash";
@@ -82,7 +79,7 @@ export async function ocrWineList(imageBase64: string, mimeType: string): Promis
       responseMimeType: "application/json",
       responseSchema: OCR_SCHEMA,
       temperature: 0.1,
-      thinkingConfig: { thinkingBudget: 128 },
+      thinkingConfig: { thinkingBudget: 0 },
       maxOutputTokens: 8192,
     },
   });
@@ -205,7 +202,7 @@ ${wineLines}`;
       responseMimeType: "application/json",
       responseSchema: SCORING_SCHEMA,
       temperature: 0.4,
-      thinkingConfig: { thinkingBudget: 512 },
+      thinkingConfig: { thinkingBudget: 0 },
       maxOutputTokens: 8192,
     },
   });

@@ -40,6 +40,12 @@ export function PageThumbStrip({ pages, onRetake, onAddPage }: Props) {
                 {page.status === "uploading" ? "…" : ""}
               </div>
             )}
+            {page.status === "uploading" && (
+              <div
+                className="absolute inset-0 animate-pulse"
+                style={{ background: "rgba(245,239,230,0.45)" }}
+              />
+            )}
           </div>
           <div
             className="mt-1 text-center text-[10px] uppercase tracking-wider"

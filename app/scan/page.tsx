@@ -295,7 +295,8 @@ export default function ScanPage() {
 
   // ---- Capture phase ----
 
-  const canRead = state.pages.some((p) => p.status === "done" && p.wineCount > 0);
+  const stillScanning = state.pages.some((p) => p.status === "uploading");
+  const canRead = !stillScanning && state.pages.some((p) => p.status === "done" && p.wineCount > 0);
   const totalWines = allWines.length;
 
   return (
@@ -334,7 +335,11 @@ export default function ScanPage() {
             className="mb-6 text-center font-display italic text-sm"
             style={{ color: "var(--color-kraft)" }}
           >
-            {totalWines} wine{totalWines === 1 ? "" : "s"} read so far
+            {stillScanning
+              ? totalWines > 0
+                ? `${totalWines} wine${totalWines === 1 ? "" : "s"} found, still scanning…`
+                : "Scanning…"
+              : `${totalWines} wine${totalWines === 1 ? "" : "s"} ready`}
           </div>
           <PageThumbStrip
             pages={state.pages}
@@ -370,7 +375,7 @@ export default function ScanPage() {
                 opacity: canRead ? 1 : 0.4,
               }}
             >
-              Read this list
+              {stillScanning ? "Scanning pages…" : "Read this list"}
             </button>
           </>
         )}
