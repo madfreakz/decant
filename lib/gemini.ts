@@ -92,35 +92,55 @@ async function callOCR(model: string, imageBase64: string, mimeType: string): Pr
 }
 
 export async function ocrWineList(imageBase64: string, mimeType: string): Promise<ScannedWine[]> {
-  // Lite is fast (~1.3s) but flakes under load. If first attempt fails with
-  // overload, skip the retry-the-lite-model dance — flash is on a different
-  // quota pool and usually available immediately.
-  const models = [OCR_MODEL, SCORING_MODEL];
-  const delays = [0, 0];
-  let lastErr: unknown = null;
+  // Race Lite vs Flash — whichever responds first wins. On a good day
+  // Lite returns in ~1.3s and we use it. When Lite is overloaded, Flash
+  // (on a separate quota pool) usually returns in ~5s and we use that
+  // instead. Costs 2x per OCR (~$0.005 total) but keeps latency consistent.
+  const t0 = Date.now();
+  const attempts = [
+    callOCR(OCR_MODEL, imageBase64, mimeType).then(
+      (text) => ({ text, source: OCR_MODEL, ok: !!text }),
+      (err) => ({ text: null as string | null, source: OCR_MODEL, ok: false, err })
+    ),
+    callOCR(SCORING_MODEL, imageBase64, mimeType).then(
+      (text) => ({ text, source: SCORING_MODEL, ok: !!text }),
+      (err) => ({ text: null as string | null, source: SCORING_MODEL, ok: false, err })
+    ),
+  ];
 
-  for (let i = 0; i < models.length; i++) {
-    if (delays[i] > 0) await new Promise((r) => setTimeout(r, delays[i]));
-    try {
-      const text = await callOCR(models[i], imageBase64, mimeType);
-      if (!text) {
-        lastErr = new Error("Empty response from Gemini");
-        continue;
-      }
-      try {
-        const parsed = JSON.parse(text) as { wines: ScannedWine[] };
-        return parsed.wines ?? [];
-      } catch (parseErr) {
-        console.error("OCR JSON parse failed:", parseErr, text.slice(0, 200));
-        return [];
-      }
-    } catch (err) {
-      lastErr = err;
-      console.warn(`OCR attempt ${i + 1}/${models.length} on ${models[i]} failed:`, err instanceof Error ? err.message : err);
-      if (!isOverloadError(err)) break; // non-retryable error
+  // Promise.any-style: first success wins, fall back to last error if all fail.
+  type Winner = { text: string; source: string };
+  const winnerBox: { value: Winner | null } = { value: null };
+  let lastErr: unknown = null;
+  await new Promise<void>((resolve) => {
+    let settled = 0;
+    for (const p of attempts) {
+      p.then((r) => {
+        settled++;
+        if (r.ok && r.text && !winnerBox.value) {
+          winnerBox.value = { text: r.text, source: r.source };
+          resolve();
+          return;
+        }
+        if ("err" in r) lastErr = r.err;
+        if (settled === attempts.length) resolve();
+      });
     }
+  });
+
+  const won = winnerBox.value;
+  if (!won) {
+    throw lastErr ?? new Error("OCR: both models failed");
   }
-  throw lastErr ?? new Error("OCR failed");
+  console.log(`OCR won by ${won.source} in ${Date.now() - t0}ms`);
+
+  try {
+    const parsed = JSON.parse(won.text) as { wines: ScannedWine[] };
+    return parsed.wines ?? [];
+  } catch (parseErr) {
+    console.error("OCR JSON parse failed:", parseErr, won.text.slice(0, 200));
+    return [];
+  }
 }
 
 // ---- Scoring: wine list → ranked verdicts ----
