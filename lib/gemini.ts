@@ -8,7 +8,8 @@ function getAI(): GoogleGenAI {
   return new GoogleGenAI({ apiKey });
 }
 
-const MODEL = "gemini-2.5-flash";
+const OCR_MODEL = "gemini-2.0-flash";
+const SCORING_MODEL = "gemini-2.5-flash";
 
 // ---- OCR: image → structured wine list ----
 
@@ -65,7 +66,7 @@ const OCR_SCHEMA = {
 export async function ocrWineList(imageBase64: string, mimeType: string): Promise<ScannedWine[]> {
   const ai = getAI();
   const res = await ai.models.generateContent({
-    model: MODEL,
+    model: OCR_MODEL,
     contents: [
       {
         role: "user",
@@ -79,7 +80,6 @@ export async function ocrWineList(imageBase64: string, mimeType: string): Promis
       responseMimeType: "application/json",
       responseSchema: OCR_SCHEMA,
       temperature: 0.1,
-      thinkingConfig: { thinkingBudget: 128 },
       maxOutputTokens: 8192,
     },
   });
@@ -190,7 +190,7 @@ export async function scoreWines(
 ${wineLines}`;
 
   const res = await ai.models.generateContent({
-    model: MODEL,
+    model: SCORING_MODEL,
     contents: [
       {
         role: "user",
