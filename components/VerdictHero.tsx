@@ -84,6 +84,14 @@ export function VerdictHero({ wine, scored, enrichment, expanded, onExpand }: Pr
             aria-label={`${conf} confidence`}
           />
         </div>
+        {wine.price_usd != null && (
+          <span
+            className="ml-auto font-mono text-2xl"
+            style={{ color: "var(--color-bordeaux)" }}
+          >
+            ${wine.price_usd}
+          </span>
+        )}
       </div>
 
       <p
@@ -114,13 +122,7 @@ export function VerdictHero({ wine, scored, enrichment, expanded, onExpand }: Pr
         </div>
       )}
 
-      <footer className="mt-6 flex items-center justify-between">
-        <span
-          className="text-sm"
-          style={{ color: "var(--color-ink)", opacity: 0.6, fontFamily: "var(--font-ui)" }}
-        >
-          {wine.price_usd != null ? `$${wine.price_usd}` : ""}
-        </span>
+      <footer className="mt-6 flex items-center justify-end">
         <button
           onClick={onExpand}
           className="text-sm tracking-wide"

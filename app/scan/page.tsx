@@ -48,6 +48,7 @@ export default function ScanPage() {
   const [verdictExpanded, setVerdictExpanded] = useState(false);
   const [showFullList, setShowFullList] = useState(false);
   const [enrichmentUnavailable, setEnrichmentUnavailable] = useState(false);
+  const [budget, setBudget] = useState(80);
 
   // Persist scan state to localStorage so iOS Safari background reaping doesn't nuke it
   useEffect(() => {
@@ -249,11 +250,13 @@ export default function ScanPage() {
     setRecognitions({});
     setEnrichments({});
 
+    // budget >= 300 means "no limit" — don't constrain
+    const effectiveBudget = budget >= 300 ? undefined : budget;
     try {
       const res = await fetch("/api/recommend", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ wines: allWines, wineType }),
+        body: JSON.stringify({ wines: allWines, wineType, budget: effectiveBudget }),
       });
       if (!res.ok || !res.body) {
         throw new Error(`Bad response: ${res.status}`);
@@ -338,6 +341,41 @@ export default function ScanPage() {
           >
             What would you like tonight?
           </h2>
+
+          <div className="mb-8">
+            <div className="flex items-baseline justify-between mb-3">
+              <span
+                className="text-xs uppercase tracking-wider"
+                style={{ color: "var(--color-kraft)", fontFamily: "var(--font-ui)" }}
+              >
+                Budget
+              </span>
+              <span
+                className="font-mono text-lg"
+                style={{ color: "var(--color-bordeaux)" }}
+              >
+                {budget >= 300 ? "no limit" : `$${budget}`}
+              </span>
+            </div>
+            <input
+              type="range"
+              min={30}
+              max={300}
+              step={10}
+              value={budget}
+              onChange={(e) => setBudget(Number(e.target.value))}
+              className="w-full accent-[var(--color-bordeaux)]"
+              style={{ accentColor: "var(--color-bordeaux)" }}
+            />
+            <div
+              className="flex justify-between mt-1 text-[10px] uppercase tracking-wider"
+              style={{ color: "var(--color-kraft)", fontFamily: "var(--font-ui)" }}
+            >
+              <span>$30</span>
+              <span>no limit</span>
+            </div>
+          </div>
+
           <div className="space-y-3">
             {types.map(({ key, label }) => (
               <button

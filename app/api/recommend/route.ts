@@ -20,9 +20,10 @@ function send(controller: ReadableStreamDefaultController, event: SSEEvent) {
 }
 
 export async function POST(req: NextRequest) {
-  const body = (await req.json()) as { wines: ScannedWine[]; wineType?: "red" | "white" | "sparkling" };
+  const body = (await req.json()) as { wines: ScannedWine[]; wineType?: "red" | "white" | "sparkling"; budget?: number };
   const wines = body.wines ?? [];
   const wineType = body.wineType;
+  const budget = body.budget;
 
   if (wines.length === 0) {
     return new Response(JSON.stringify({ error: "No wines provided" }), {
@@ -60,7 +61,7 @@ export async function POST(req: NextRequest) {
         });
 
         // 2. Scoring pass — ONE LLM call with all wines + taste profile
-        const scoringResult = await scoreWines(wines, recognitionMatches, wineType);
+        const scoringResult = await scoreWines(wines, recognitionMatches, wineType, budget);
         send(controller, { type: "scored", result: scoringResult });
 
         // 3. Vivino enrichment — top 5 wines (verdict + alternates + next 2 scored), sequential

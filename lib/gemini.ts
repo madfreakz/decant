@@ -177,7 +177,8 @@ const SCORING_SCHEMA = {
 export async function scoreWines(
   wines: ScannedWine[],
   recognitionMatches: Record<number, { wineName: string; rating: number; date: string }>,
-  wineTypeConstraint?: string
+  wineTypeConstraint?: string,
+  budget?: number
 ): Promise<ScoringResult> {
   const ai = getAI();
 
@@ -190,9 +191,14 @@ export async function scoreWines(
     })
     .join("\n");
 
-  const constraint = wineTypeConstraint
-    ? `Mark wants only ${wineTypeConstraint.toUpperCase()} wines tonight. All three picks (verdict, safer_pick, wild_card) must be ${wineTypeConstraint}.\n\n`
-    : "";
+  const constraints: string[] = [];
+  if (wineTypeConstraint) {
+    constraints.push(`Mark wants only ${wineTypeConstraint.toUpperCase()} wines tonight. All three picks (verdict, safer_pick, wild_card) MUST be ${wineTypeConstraint}.`);
+  }
+  if (budget) {
+    constraints.push(`Mark's target price tonight: $${budget}. All three picks should be at or under this price. Hard ceiling: $${Math.round(budget * 1.3)}. NEVER pick something more expensive than the ceiling, even if it scores higher — the experience of overpaying ruins the wine for him.`);
+  }
+  const constraint = constraints.length > 0 ? constraints.join("\n") + "\n\n" : "";
 
   const userPrompt = `${constraint}Here is the wine list (indexed). Score every wine and pick the verdict + alternates.
 
@@ -211,8 +217,8 @@ ${wineLines}`;
       responseMimeType: "application/json",
       responseSchema: SCORING_SCHEMA,
       temperature: 0.4,
-      thinkingConfig: { thinkingBudget: 512 },
-      maxOutputTokens: 8192,
+      thinkingConfig: { thinkingBudget: 256 },
+      maxOutputTokens: 4096,
     },
   });
 
