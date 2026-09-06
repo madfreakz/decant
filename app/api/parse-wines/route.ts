@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseWinesFromText } from "@/lib/gemini";
+import { guardRequest } from "@/lib/guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,6 +14,9 @@ export async function GET() {
 const MAX_TEXT = 50_000; // sanity cap on raw OCR input
 
 export async function POST(req: NextRequest) {
+  const denied = guardRequest(req);
+  if (denied) return NextResponse.json({ error: denied.error, wines: [] }, { status: denied.status });
+
   let body: { text?: string };
   try {
     body = await req.json();

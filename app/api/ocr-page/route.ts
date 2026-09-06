@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ocrWineList } from "@/lib/gemini";
+import { guardRequest } from "@/lib/guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,9 @@ export async function GET() {
 const MAX_BYTES = 4 * 1024 * 1024; // 4 MB
 
 export async function POST(req: NextRequest) {
+  const denied = guardRequest(req);
+  if (denied) return NextResponse.json({ error: denied.error, wines: [] }, { status: denied.status });
+
   const contentType = req.headers.get("content-type") ?? "";
 
   let imageBase64: string;
