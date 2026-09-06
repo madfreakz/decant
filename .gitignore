@@ -7,3 +7,6 @@ node_modules
 *.tsbuildinfo
 next-env.d.ts
 .DS_Store
+
+# Local scratch probes from Gemini model/schema testing
+test_*.js

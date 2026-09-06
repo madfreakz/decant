@@ -8,7 +8,7 @@ Next.js 15 + React 19 + Tailwind 4 + `@google/genai`. Deployed to Vercel. Same s
 
 ## Env vars
 
-- `GEMINI_API_KEY` — same value as ai-digest
+- `GEMINI_API_KEY` — Decant's own Gemini key (own Google Cloud project for per-project usage/cost tracking; no longer shared with ai-digest). Local `.env.local` uses the shared `gemini-dev-scratch` key.
 - `VIVINO_SESSION_COOKIE` — current `_ruby-web_session` (refresh from Chrome DevTools if 401s)
 - `VIVINO_USER_ID=15328411`
 

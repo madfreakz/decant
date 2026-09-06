@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { scoreWines, type ScannedWine } from "@/lib/gemini";
 import { findRecognitionMatch } from "@/lib/rated-wines-index";
 import { searchWines } from "@/lib/vivino";
+import { guardRequest } from "@/lib/guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,15 +30,40 @@ type Enrichment = {
   vivino_url: string | null;
 };
 
+// Hard ceiling on wines per scoring call. Two reasons, both load-bearing:
+//  - Cost: this route was the only one with no input cap, so an unauthenticated
+//    caller could feed an arbitrarily large array into a billed Gemini call.
+//  - Correctness: SCORING_SCHEMA requires `reasoning` AND `notes` for EVERY
+//    wine, at roughly 70 output tokens each. Against maxOutputTokens 8192 that
+//    is ~115 wines before the JSON truncates mid-object and JSON.parse throws.
+//    100 keeps a safety margin. Do not raise this without raising
+//    SCORING_MAX_OUTPUT_TOKENS in lib/gemini.ts first.
+const MAX_WINES = 100;
+
 export async function POST(req: NextRequest) {
-  const body = (await req.json()) as {
-    wines: ScannedWine[];
+  const denied = guardRequest(req);
+  if (denied) return NextResponse.json({ error: denied.error }, { status: denied.status });
+
+  let body: {
+    wines?: ScannedWine[];
     wineType?: "red" | "white" | "sparkling";
     budget?: number;
   };
-  const wines = body.wines ?? [];
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const wines = Array.isArray(body.wines) ? body.wines : [];
   if (wines.length === 0) {
     return NextResponse.json({ error: "No wines provided" }, { status: 400 });
+  }
+  if (wines.length > MAX_WINES) {
+    return NextResponse.json(
+      { error: `That list has ${wines.length} wines; ${MAX_WINES} is the max per scan. Scan fewer pages at a time.` },
+      { status: 413 }
+    );
   }
 
   const t0 = Date.now();
