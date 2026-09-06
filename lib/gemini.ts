@@ -11,6 +11,16 @@ function getAI(): GoogleGenAI {
 const OCR_MODEL = "gemini-2.5-flash-lite";
 const SCORING_MODEL = "gemini-2.5-flash";
 
+// SCORING_SCHEMA requires `reasoning` AND `notes` on every scored wine, so the
+// output grows linearly with the list — roughly 70 tokens per wine. The old
+// 3072 truncated somewhere north of ~40 wines, which is an ordinary restaurant
+// list: Gemini returned half a JSON object, JSON.parse threw, and the user saw
+// the generic "Couldn't pick a verdict" with a retry that failed identically.
+// Same pitfall as the ai-digest playbook's "maxOutputTokens must be >= 8192".
+// Paired with MAX_WINES = 100 in app/api/recommend/route.ts; raise both or
+// neither.
+const SCORING_MAX_OUTPUT_TOKENS = 8192;
+
 // ---- OCR: image → structured wine list ----
 
 const OCR_PROMPT = `You are reading a restaurant wine list. Extract every wine you can identify.
@@ -392,7 +402,7 @@ ${wineLines}`;
         responseSchema: SCORING_SCHEMA,
         temperature: 0.4,
         ...(withThinking ? { thinkingConfig: { thinkingBudget: 128 } } : {}),
-        maxOutputTokens: 3072,
+        maxOutputTokens: SCORING_MAX_OUTPUT_TOKENS,
       },
     });
 
@@ -435,7 +445,22 @@ ${wineLines}`;
 
   const text = won.text;
   if (!text) throw new Error("Empty scoring response");
-  const result = JSON.parse(text) as ScoringResult;
+
+  // Unlike ocrWineList / parseWinesFromText, this parse used to be bare. A
+  // truncated response (see SCORING_MAX_OUTPUT_TOKENS) surfaced as a raw
+  // SyntaxError. Throw a labelled error instead so the cause is visible in the
+  // logs rather than having to infer it from a stack.
+  let result: ScoringResult;
+  try {
+    result = JSON.parse(text) as ScoringResult;
+  } catch (parseErr) {
+    console.error("Scoring JSON parse failed:", parseErr, text.slice(0, 200));
+    throw new Error("Scoring returned malformed JSON (likely truncated output)");
+  }
+  if (!Array.isArray(result?.scored)) {
+    console.error("Scoring response missing `scored` array:", text.slice(0, 200));
+    throw new Error("Scoring returned no scored wines");
+  }
   // Sanitize: ensure required string fields don't surface "null" / empty.
   const cleanStr = (s: string | null | undefined, fallback: string): string => {
     if (!s) return fallback;
