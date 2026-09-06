@@ -27,6 +27,10 @@ Ported from `~/projects/vivino-mcp-server/src/`:
 - `tools/search.ts` → search wines
 - `tools/wines.ts` → details + taste profile
 
+## Before touching any Gemini call
+
+Read `~/Documents/Obsidian Vault/Knowledge/Engineering/gemini-production-rules.md` first. It holds the rules that apply to every Gemini app, not just this one: output-token budgets sized to worst-case output (the 3072 ceiling here truncated ordinary wine lists for months), thinking-budget floors per model tier, throw-don't-return-empty, validating model output, and fencing untrusted input. Decant's worst bug was a rule ai-digest had already written down and never shared.
+
 ## Pitfalls
 
 - **Vivino cookie expiry:** on 401/403, skip enrichment. Don't crash. Refresh cookie from Chrome DevTools.
