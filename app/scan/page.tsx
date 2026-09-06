@@ -263,6 +263,11 @@ export default function ScanPage() {
     // round-trip); vision is the safety net for stylized/handwritten lists.
     const t0 = performance.now();
 
+    // Which path actually produced the wines Promise.any hands back. Set
+    // synchronously by the winner, immediately before it returns, so there is
+    // no race to read it afterwards.
+    let ocrWinner: "tesseract" | "vision" | null = null;
+
     const tesseractPath = (async (): Promise<ScannedWine[]> => {
       const worker = tesseractWorkerRef.current;
       if (!worker) throw new Error("Tesseract worker not ready");
@@ -282,6 +287,7 @@ export default function ScanPage() {
       if (!res.ok || !json.wines || json.wines.length === 0) {
         throw new Error(`parse-wines ${res.status}: ${json.error ?? "no wines"}`);
       }
+      ocrWinner ??= "tesseract";
       return json.wines;
     })();
 
@@ -293,6 +299,7 @@ export default function ScanPage() {
       if (!res.ok || !data.wines || data.wines.length === 0) {
         throw new Error(`ocr-page ${res.status}: ${data.error ?? "no wines"}`);
       }
+      ocrWinner ??= "vision";
       return data.wines;
     })();
 
@@ -300,12 +307,7 @@ export default function ScanPage() {
       // Promise.any: take whichever path returns a non-empty wine list first.
       const wines = await Promise.any([tesseractPath, visionPath]);
       const totalMs = Math.round(performance.now() - t0);
-      // Diagnostic: which path produced the result we used?
-      const tessWon = await Promise.race([
-        tesseractPath.then(() => true, () => false),
-        Promise.resolve(false),
-      ]);
-      console.log(`OCR done in ${totalMs}ms (${tessWon ? "tesseract" : "vision"} likely first)`);
+      console.log(`OCR done in ${totalMs}ms (${ocrWinner ?? "unknown"} won)`);
       dispatch({ type: "UPDATE_PAGE", id, patch: { status: "done", wines, wineCount: wines.length } });
     } catch (err) {
       // Promise.any rejects with AggregateError when ALL paths failed
